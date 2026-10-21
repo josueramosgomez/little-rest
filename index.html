@@ -1,0 +1,186 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Little Rest</title><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="theme-color" content="#f6f0e4"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Little Rest"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+:root{--bg:#f6f0e4;--card:#fffaf0;--ink:#3b3a30;--mut:#847f6c;--sage:#8a9a78;--olive:#5f6b45;--line:#e4dcc8;--warn:#b5653a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 Georgia,serif;padding-bottom:88px}
+main{max-width:520px;margin:0 auto;padding:max(16px,env(safe-area-inset-top)) 16px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px;margin:12px 0}
+h1{font-size:24px;margin:4px 0}h2{font-size:14px;margin:0 0 8px;color:var(--olive);text-transform:uppercase;letter-spacing:.06em}
+.mut{color:var(--mut);font-size:14px}.big{font-size:36px}button,input,select,textarea{font:inherit}
+.btn{border:0;border-radius:18px;background:var(--olive);color:#fff;padding:16px;width:100%;font-size:18px;margin:6px 0}
+.btn.alt{background:#e7e1cc;color:var(--ink)}.btn.warn{background:var(--warn)}.btn.sm{padding:10px 14px;font-size:15px;width:auto;margin:0}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;padding:16px 4px;color:var(--mut);font-size:14px}nav .on{color:var(--olive);font-weight:bold}
+label{display:block;margin:10px 0 4px;font-size:14px;color:var(--mut)}
+input,select,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.tl{position:relative;height:30px;background:#ece5d0;border-radius:10px;overflow:hidden}.tl i{position:absolute;top:0;bottom:0;background:var(--sage)}.tl i.n{background:var(--olive)}
+.item{padding:10px 0;border-top:1px solid var(--line)}.item:first-child{border-top:0}
+.modal{position:fixed;inset:0;background:#0006;z-index:9;display:flex;align-items:flex-end}.modal>div{background:var(--bg);width:100%;max-width:520px;margin:0 auto;max-height:92vh;overflow:auto;border-radius:24px 24px 0 0;padding:20px}
+.err{color:var(--warn);font-size:14px}
+.fm{position:absolute;top:0;bottom:0;width:3px;background:var(--warn)}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}.cd{background:#fff;border:1px solid var(--line);border-radius:10px;min-height:60px;padding:3px;font-size:12px;overflow:hidden}.cd.sel{border:2px solid var(--olive)}
+.dots u{display:inline-block;width:7px;height:7px;border-radius:50%;margin:1px;background:var(--warn)}.dots u.biberon{background:#6a8caf}.dots u.solidos{background:#c9a227}
+.sb{height:4px;background:#ece5d0;border-radius:2px;margin-top:3px}.sb i{display:block;height:100%;background:var(--sage);border-radius:2px}
+</style></head><body><main id="app"></main><nav id="nav"></nav>
+<script>
+const K='littlerest.v1';
+function load(){try{const s=JSON.parse(localStorage.getItem(K));if(s&&s.sessions){s.feeds=s.feeds||[];return s}}catch(e){}return{baby:null,sessions:[],predictions:[],feeds:[],settings:{notif:false,h24:true}}}
+let S=load(),tab='hoy',hDay=null,modal=null,now=Date.now();
+function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){alert('No se pudo guardar: almacenamiento lleno o bloqueado.')}}
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const $=i=>document.getElementById(i);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tz=()=>(S.baby&&S.baby.tz)||Intl.DateTimeFormat().resolvedOptions().timeZone;
+// ---- tiempo (todo se guarda en ms UTC; se muestra en la zona del perfil)
+function parts(ms,z){const o={};new Intl.DateTimeFormat('en-CA',{timeZone:z,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).formatToParts(ms).forEach(p=>o[p.type]=p.value);return o}
+function offset(ms,z){const o=parts(ms,z);return Date.UTC(+o.year,o.month-1,+o.day,+o.hour,+o.minute)-Math.floor(ms/6e4)*6e4}
+function toMs(d,t,z){const [y,m,dd]=d.split('-').map(Number),[h,mi]=t.split(':').map(Number);const g=Date.UTC(y,m-1,dd,h,mi);let r=g-offset(g,z);return g-offset(r,z)}
+const dkey=(ms,z)=>{const o=parts(ms,z);return o.year+'-'+o.month+'-'+o.day};
+const addDays=(k,n)=>new Date(Date.parse(k+'T12:00:00Z')+n*864e5).toISOString().slice(0,10);
+const hm=(ms,z)=>{const o=parts(ms,z);return o.hour+':'+o.minute};
+const T=ms=>S.settings.h24?hm(ms,tz()):new Date(ms).toLocaleTimeString('es-ES',{timeZone:tz(),hour:'numeric',minute:'2-digit',hour12:true});
+const D=ms=>{const m=Math.round(ms/6e4);return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')+' min'};
+const ok=s=>s.end&&s.end>s.start&&s.end-s.start<=20*36e5;
+// ---- validación
+const ov=(s,id,l)=>(l||S.sessions).find(o=>o.id!==id&&s.start<(o.end==null?Infinity:o.end)&&o.start<(s.end==null?Infinity:s.end));
+function validate(s,id){if(!isFinite(s.start)||(s.end!=null&&!isFinite(s.end)))return'Fecha u hora no válida.';if(s.end!=null&&s.end<=s.start)return'El final debe ser posterior al inicio.';if(s.end!=null&&s.end-s.start>20*36e5)return'Duración superior a 20 h.';if(s.start>Date.now()+6e4)return'El inicio está en el futuro.';if(s.end==null&&S.sessions.some(o=>o.id!==id&&o.end==null))return'Ya hay un sueño en curso.';const o=ov(s,id);if(o)return'Se solapa con otro registro ('+T(o.start)+').';return''}
+// ---- motor de predicción (puro, determinista)
+const AGE=[[1,40,70,5],[2,50,80,4],[3,60,90,4],[4,75,105,4],[6,90,130,3],[8,120,150,3],[10,150,195,2],[14,180,240,2],[18,210,300,1],[24,300,360,1],[999,360,420,1]]; // [meses<, min despierto, max despierto, siestas típicas] aproximación general, NO tabla médica validada
+const ageR=m=>AGE.find(a=>m<a[0]);
+const med=a=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y),n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2};
+const mad=a=>{const m=med(a);return m==null?0:med(a.map(x=>Math.abs(x-m)))};
+const calcErr=(p,actual)=>Math.round((actual-(p.ws+p.we)/2)/6e4*10)/10;
+function metricsOf(l){const r=l.filter(p=>p.err!=null);if(r.length<5)return{n:r.length};const a=r.map(p=>Math.abs(p.err));return{n:r.length,mae:a.reduce((x,y)=>x+y,0)/a.length,med:med(a),inw:r.filter(p=>p.actual>=p.ws&&p.actual<=p.we).length/r.length,cov:r.length/l.length,bias:med(r.map(p=>p.err))}}
+function predict(sess,preds,now,am,z){
+ if(sess.some(s=>s.end==null))return{status:'dormido'};
+ const ses=sess.filter(ok).sort((a,b)=>a.start-b.start),last=ses[ses.length-1];
+ if(!last||now-last.end>16*36e5)return{status:'sin_datos',why:'No hay un despertar reciente registrado. Añade el último despertar (botón «Añadir sueño pasado») para obtener una estimación.'};
+ const r=ageR(am),amid=(r[1]+r[2])/2,ahalf=(r[2]-r[1])/2,notes=['Rango inicial por edad: '+r[1]+'–'+r[2]+' min despierto (aproximación general, no una tabla médica validada).'];
+ const rec=ses.filter(s=>s.start>now-14*864e5),gaps=[];
+ for(let i=1;i<rec.length;i++){const g=(rec[i].start-rec[i-1].end)/6e4;if(rec[i].type==='nap'&&g>=20&&g<=480)gaps.push(g)}
+ const n=gaps.length,w=Math.min(1,n/10);let center=amid,half=ahalf;
+ if(n>=3){const m=med(gaps);center=(1-w)*amid+w*m;half=(1-w)*ahalf+w*Math.max(10,1.5*mad(gaps));notes.push('Mediana personal de '+n+' intervalos despierto→siesta (últimos 14 días): '+Math.round(m)+' min. Peso del historial: '+Math.round(w*100)+'%.')}else notes.push('Menos de 3 intervalos propios: se usa solo la edad.');
+ if(last.type==='nap'&&last.end-last.start<30*6e4){center-=10;notes.push('La última siesta fue corta (<30 min): ventana adelantada 10 min.')}
+ const errs=preds.filter(p=>p.err!=null).sort((a,b)=>b.generatedAt-a.generatedAt).slice(0,10).map(p=>p.err);
+ if(errs.length>=5){const b=Math.max(-20,Math.min(20,med(errs)))*.5;if(Math.abs(b)>=1){center+=b;notes.push('Corrección por errores pasados: '+(b>0?'+':'')+Math.round(b)+' min.')}}
+ const ws=last.end+(center-half)*6e4,we=last.end+(center+half)*6e4,today=dkey(now,z),ds=toMs(today,'00:00',z);
+ const napsToday=rec.filter(s=>s.type==='nap'&&s.start>=ds).length,wp=parts(ws,z);
+ const bedNext=(+wp.hour*60+ +wp.minute)>=17.5*60||napsToday>=r[3];
+ const napLen=med(rec.filter(s=>s.type==='nap').map(s=>(s.end-s.start)/6e4))||60;
+ let bed=(ws+we)/2;
+ if(!bedNext){const extra=Math.max(0,r[3]-1-napsToday);bed+=((1+extra)*napLen+extra*center+center*1.2)*6e4;notes.push('Hora de dormir: supone '+(1+extra)+' siesta(s) más de '+Math.round(napLen)+' min y una última ventana ~20% más larga.')}
+ const ns=rec.filter(s=>s.type==='night').map(s=>{const o=parts(s.start,z);let c=+o.hour*60+ +o.minute;return c<720?c+1440:c});
+ if(ns.length>=3){bed=(bed+ds+med(ns)*6e4)/2;notes.push('Hora de dormir mezclada con tu mediana de '+ns.length+' noches.')}
+ bed=Math.min(bed,toMs(today,'21:30',z));
+ const q=n<3?'baja':n<8?'media':(mad(gaps)<20?'alta':'media');
+ return{status:'ok',ws,we,bed,bedHalf:Math.max(25,Math.round(half)+10),bedNext,center,half,n,quality:q,basis:last.end,notes}}
+const predNow=()=>S.baby?predict(S.sessions,S.predictions,Date.now(),ageM(Date.now()),tz()):{status:'sin_datos',why:''};
+function ageM(at){const b=S.baby;if(!b)return 0;let d=(at-Date.parse(b.dob))/864e5/30.44;if(b.corr)d-=b.corr/4.345;return Math.max(0,d)}
+function ensurePred(){const p=predNow();if(p.status==='ok'&&!S.predictions.some(x=>x.basis===p.basis))S.predictions.push({id:uid(),babyId:S.baby.id,generatedAt:Date.now(),basis:p.basis,ws:p.ws,we:p.we,bed:p.bed,method:p.n>=3?'edad+historial':'edad',quality:p.quality,actual:null,err:null});return p}
+function resolve(start){const c=S.predictions.filter(p=>p.actual==null&&p.basis<start&&p.generatedAt<=start&&start-p.basis<16*36e5).sort((a,b)=>b.generatedAt-a.generatedAt)[0];if(c){c.actual=start;c.err=calcErr(c,start)}}
+// ---- acciones
+function after(){ensurePred();save();sched();render()}
+function startSleep(type){if(S.sessions.some(s=>s.end==null))return;const t=Date.now();resolve(t);S.sessions.push({id:uid(),babyId:S.baby.id,start:t,end:null,type,source:'timer',notes:'',createdAt:t,updatedAt:t,quality:'incomplete'});after()}
+function endSleep(){const s=S.sessions.find(x=>x.end==null);if(!s)return;s.end=Date.now();s.updatedAt=s.end;s.quality='complete';after()}
+function go(k){tab=k;modal=null;render()}
+function openForm(id){const s=id?S.sessions.find(x=>x.id===id):null,z=tz(),t=Date.now();modal={kind:'f',id,date:s?dkey(s.start,z):dkey(t,z),st:s?hm(s.start,z):hm(t-36e5,z),en:s?(s.end?hm(s.end,z):''):hm(t,z),type:s?s.type:'nap',notes:s?s.notes:'',err:''};render()}
+function saveForm(){const g=i=>$(i).value,z=tz();const m={kind:'f',id:modal.id,date:g('f_d'),st:g('f_s'),en:g('f_e'),type:g('f_t'),notes:g('f_n'),err:''};
+ if(!m.date||!m.st){modal=m;modal.err='Falta la fecha o la hora de inicio.';return render()}
+ const start=toMs(m.date,m.st,z);let end=null;if(m.en){end=toMs(m.date,m.en,z);if(end<=start)end=toMs(addDays(m.date,1),m.en,z)}
+ const cand={start,end},e=validate(cand,m.id);if(e){modal=m;modal.err=e;return render()}
+ const t=Date.now();if(m.id){const s=S.sessions.find(x=>x.id===m.id);Object.assign(s,{start,end,type:m.type,notes:m.notes,updatedAt:t,quality:end?'complete':'incomplete'})}
+ else S.sessions.push({id:uid(),babyId:S.baby.id,start,end,type:m.type,source:'manual',notes:m.notes,createdAt:t,updatedAt:t,quality:end?'estimated':'incomplete'});
+ modal=null;after()}
+function delSession(id){if(confirm('¿Eliminar este registro? No se puede deshacer.')){S.sessions=S.sessions.filter(s=>s.id!==id);modal=null;after()}}
+function saveProfile(){const g=i=>$(i).value.trim();const n=g('p_n'),d=g('p_d'),z=g('p_z'),c=+g('p_c')||0;
+ if(!n||!d||isNaN(Date.parse(d))||Date.parse(d)>Date.now())return alert('Indica un nombre/apodo y una fecha de nacimiento válida.');
+ try{new Intl.DateTimeFormat('en',{timeZone:z})}catch(e){return alert('Zona horaria no válida (ejemplo: Europe/Madrid).')}
+ S.baby={id:S.baby?S.baby.id:uid(),name:n,dob:d,corr:c,tz:z,createdAt:S.baby?S.baby.createdAt:Date.now()};save();if(S.baby)ensurePred();render()}
+// ---- avisos locales (solo en la app Android)
+const LN=()=>window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.LocalNotifications;
+async function sched(){const ln=LN();if(!ln||!S.settings.notif)return;try{await ln.cancel({notifications:[{id:1},{id:2},{id:3}]});const p=predNow(),t=Date.now(),l=[],mk=(id,at,body)=>({id,title:'Little Rest',body,schedule:{at:new Date(at),allowWhileIdle:true}});
+ if(p.status==='ok'){if(p.ws>t)l.push(mk(1,p.ws,p.bedNext?'Empieza la ventana de sueño de la noche.':'Empieza la ventana de siesta estimada.'));if(p.bed-18e5>t)l.push(mk(2,p.bed-18e5,'La hora de dormir estimada se acerca.'))}
+ const a=S.sessions.find(s=>s.end==null&&s.type==='nap');if(a&&a.start+3*36e5>t)l.push(mk(3,a.start+3*36e5,'Hay una siesta en marcha desde hace 3 h.'));
+ if(l.length)await ln.schedule({notifications:l})}catch(e){}}
+async function toggleNotif(){const ln=LN(),on=!S.settings.notif;if(on){if(!ln)return alert('Los avisos solo funcionan en la app Android instalada.');const r=await ln.requestPermissions();if(r.display!=='granted')return alert('Permiso de notificaciones denegado. Actívalo en los ajustes del móvil.')}
+ S.settings.notif=on;save();if(on)sched();else if(ln)try{await ln.cancel({notifications:[{id:1},{id:2},{id:3}]})}catch(e){}render()}
+// ---- estadísticas
+function dayStats(k){const z=tz(),ds=toMs(k,'00:00',z),de=toMs(addDays(k,1),'00:00',z);let nap=0,nn=0,night=0,has=false;S.sessions.filter(ok).forEach(s=>{if(s.type==='nap'&&s.start>=ds&&s.start<de){nap+=s.end-s.start;nn++;has=true}if(s.type==='night'&&s.end>=ds&&s.end<de){night+=s.end-s.start;has=true}});return{nap,nn,night,has}}
+const range=(n,e)=>Array.from({length:n},(_,i)=>dayStats(addDays(e,-i))).filter(x=>x.has);
+const avg=(a,f)=>a.reduce((x,y)=>x+f(y),0)/a.length;
+// ---- vistas
+const ageTxt=()=>{const d=Math.floor((now-Date.parse(S.baby.dob))/864e5);return(d<60?d+' días':Math.floor(d/30.44)+' meses')+(S.baby.corr?' · edad corregida '+Math.floor(ageM(now))+' m':'')};
+const sItem=s=>`<div class="item row"><div><b>${s.type==='nap'?'Siesta':'Noche'}</b> ${T(s.start)}–${s.end?T(s.end)+' · '+D(s.end-s.start):'en curso'}<div class="mut">${esc(s.notes)}${s.source==='manual'?' · manual':''}${s.end&&!ok(s)?' · ⚠ dato dudoso':''}</div></div><button class="btn alt sm" onclick="openForm('${s.id}')">Editar</button></div>`;
+function tline(ds,de){const L=de-ds;return'<div class="tl">'+S.sessions.filter(s=>s.start<de&&(s.end==null?now:s.end)>ds).map(s=>{const a=Math.max(s.start,ds),b=Math.min(s.end==null?now:s.end,de);return`<i class="${s.type==='night'?'n':''}" style="left:${(a-ds)/L*100}%;width:${Math.max(.6,(b-a)/L*100)}%"></i>`}).join('')+S.feeds.filter(f=>f.t>=ds&&f.t<de).map(f=>`<b class="fm" style="left:${(f.t-ds)/L*100}%"></b>`).join('')+'</div><div class="row mut"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>'}
+function predBlock(p){if(p.status==='dormido')return'<div class="mut">Durmiendo ahora. La estimación se recalculará al terminar.</div>';if(p.status!=='ok')return`<div class="mut">${p.why}</div>`;return`<div>${p.bedNext?'Próximo sueño (noche)':'Próxima siesta'}: entre <b>${T(p.ws)}</b> y <b>${T(p.we)}</b></div><div>Hora de dormir aprox.: <b>${T(p.bed-p.bedHalf*6e4)}–${T(p.bed+p.bedHalf*6e4)}</b></div><div class="mut">Fiabilidad: ${p.quality} · ${p.n} intervalos propios</div>`}
+const NOTE='<div class="mut">Estimación orientativa, no médica ni garantizada. Si tu bebé muestra señales de sueño, acuéstalo sin esperar a la ventana.</div>';
+function vToday(){const z=tz(),k=dkey(now,z),ds=toMs(k,'00:00',z),de=toMs(addDays(k,1),'00:00',z),act=S.sessions.find(s=>s.end==null),st=dayStats(k);
+ const wake=S.sessions.filter(s=>ok(s)&&s.type==='night'&&s.end>=ds&&s.end<de).sort((a,b)=>b.end-a.end)[0],done=S.sessions.filter(ok).sort((a,b)=>b.end-a.end)[0],since=act?act.start:(done?done.end:'');
+ return`<h1>${esc(S.baby.name)}</h1><div class="mut">${ageTxt()} · ${new Date(now).toLocaleDateString('es-ES',{timeZone:z,weekday:'long',day:'numeric',month:'long'})}</div>
+<div class="card"><h2>${act?(act.type==='nap'?'Siesta en curso':'Sueño nocturno en curso'):'Despierto'}</h2><div class="big" id="el" data-t="${since}">${since?D(now-since):'—'}</div><div class="mut">${act?'desde las '+T(act.start):'Despertar de hoy: '+(wake?T(wake.end):'sin registrar')}</div>
+${act?'<button class="btn warn" onclick="endSleep()">Terminar</button>':'<button class="btn" onclick="startSleep(\'nap\')">Empezar siesta</button><button class="btn alt" onclick="startSleep(\'night\')">Empezar sueño nocturno</button>'}<button class="btn alt" onclick="openForm()">+ Añadir sueño pasado</button></div>
+<div class="card"><h2>Siguiente</h2>${predBlock(predNow())}${NOTE}</div>
+${feedCard(ds,de)}<div class="card"><h2>Hoy</h2>${tline(ds,de)}<div style="margin-top:10px">Sueño de día: <b>${D(st.nap)}</b> · Siestas: <b>${st.nn}</b></div><div>Noche (despertar de hoy): <b>${st.night?D(st.night):'sin datos'}</b></div></div>`}
+function vHist(){const z=tz(),today=dkey(now,z);hDay=hDay||today;const ds=toMs(hDay,'00:00',z),de=toMs(addDays(hDay,1),'00:00',z),l=S.sessions.filter(s=>s.start<de&&(s.end==null?now:s.end)>ds).sort((a,b)=>a.start-b.start),st=dayStats(hDay),w1=range(7,today),w0=range(7,addDays(today,-7)),m=range(30,today);
+ const sm=(a,t)=>{if(!a.length)return`<div class="mut">${t}: sin datos</div>`;const nn=a.reduce((x,y)=>x+y.nn,0);return`<div class="mut">${t}: ${a.length} días con datos · sueño de día ${D(avg(a,x=>x.nap))}/día · ${(nn/a.length).toFixed(1)} siestas/día · siesta media ${nn?D(a.reduce((x,y)=>x+y.nap,0)/nn):'—'} · noche ${D(avg(a,x=>x.night))}</div>`};
+ let cmp='Sin semana anterior para comparar';if(w1.length&&w0.length){const d=(avg(w1,x=>x.nap)-avg(w0,x=>x.nap))/6e4;cmp='Sueño de día vs semana anterior: '+(d>=0?'+':'−')+Math.round(Math.abs(d))+' min/día'}
+ return`<h1>Historial</h1>${vCal()}<div class="card"><div class="row"><button class="btn alt sm" onclick="hDay=addDays(hDay,-1);render()">‹</button><input type="date" value="${hDay}" onchange="hDay=this.value||hDay;render()"><button class="btn alt sm" onclick="hDay=addDays(hDay,1);render()">›</button></div><div style="margin:12px 0">${tline(ds,de)}</div><div>Día: <b>${D(st.nap)}</b> · ${st.nn} siestas · Noche: <b>${st.night?D(st.night):'—'}</b></div>${l.length?l.map(sItem).join(''):'<div class="mut">Sin sueños este día.</div>'}${S.feeds.filter(f=>f.t>=ds&&f.t<de).sort((a,b)=>a.t-b.t).map(fItem).join('')}<button class="btn alt" onclick="openForm()">+ Añadir sueño</button><button class="btn alt" onclick="openFeed()">+ Añadir toma</button></div>
+<div class="card"><h2>Resumen</h2>${sm(w1,'7 días')}${sm(m,'30 días')}<div class="mut">${cmp}</div>${feedSum()}</div>`}
+function vPred(){const p=predNow(),mt=metricsOf(S.predictions),r=[...S.predictions].sort((a,b)=>b.generatedAt-a.generatedAt).slice(0,8);
+ return`<h1>Predicción</h1><div class="card">${predBlock(p)}${NOTE}</div>${p.status==='ok'?`<div class="card"><h2>Base de la estimación</h2><div class="mut">Calculada desde el último despertar a las ${T(p.basis)}. Se recalcula al terminar cada sueño.</div>${p.notes.map(n=>'<div class="mut">• '+n+'</div>').join('')}</div>`:''}
+<div class="card"><h2>Precisión interna</h2>${mt.mae==null?`<div class="mut">Aún insuficiente: ${mt.n} de 5 predicciones comprobadas.</div>`:`<div>Error medio ${Math.round(mt.mae)} min · mediana ${Math.round(mt.med)} min</div><div>Dentro de la ventana: ${Math.round(mt.inw*100)}% · cobertura ${Math.round(mt.cov*100)}%</div><div class="mut">${Math.abs(mt.bias)>10?'Tendencia: el bebé se duerme '+(mt.bias>0?'más tarde':'antes')+' de lo estimado.':'Sin sesgo sistemático claro.'}</div>`}<div class="mut">Es rendimiento interno de este modelo, no validación clínica.</div></div>
+<div class="card"><h2>Estimaciones guardadas</h2>${r.length?r.map(x=>`<div class="item mut">${new Date(x.ws).toLocaleDateString('es-ES',{timeZone:tz(),day:'numeric',month:'short'})} ${T(x.ws)}–${T(x.we)} → ${x.actual?'real '+T(x.actual)+' ('+(x.err>0?'+':'')+x.err+' min)':'pendiente'}</div>`).join(''):'<div class="mut">Todavía ninguna.</div>'}</div>`}
+function vProfile(first){const b=S.baby||{};return`<div class="card"><h1>${first?'Bienvenido a Little Rest':'Perfil del bebé'}</h1><label>Nombre o apodo</label><input id="p_n" value="${esc(b.name)}"><label>Fecha de nacimiento</label><input id="p_d" type="date" value="${b.dob||''}"><label>Semanas de prematuridad (opcional)</label><input id="p_c" type="number" min="0" max="20" value="${b.corr||''}"><label>Zona horaria</label><input id="p_z" value="${esc(b.tz||Intl.DateTimeFormat().resolvedOptions().timeZone)}"><button class="btn" onclick="saveProfile()">Guardar</button></div>`}
+function vSet(){return`${vProfile(false)}<div class="card"><h2>Preferencias</h2><label>Formato de hora</label><select onchange="S.settings.h24=this.value==='1';save();render()"><option value="1" ${S.settings.h24?'selected':''}>24 horas</option><option value="0" ${S.settings.h24?'':'selected'}>12 horas</option></select>${LN()?`<button class="btn alt" onclick="toggleNotif()">Avisos: ${S.settings.notif?'activados':'desactivados'}</button>`:'<div class="mut">Esta versión web no envía avisos.</div>'}</div>
+<div class="card"><h2>Datos</h2><button class="btn alt" onclick="modal={kind:'x'};render()">Exportar / importar</button><button class="btn alt" onclick="alert(selfTest().map(r=>(r[1]?'✓ ':'✗ ')+r[0]).join('\\n'))">Ejecutar autopruebas</button><button class="btn warn" onclick="wipe()">Borrar todos los datos</button><div class="mut">Los datos viven solo en este móvil. Borrar los datos de la app o desinstalarla los elimina: exporta de vez en cuando.</div></div>`}
+function vModal(){if(modal.kind==='m')return vFeedForm();if(modal.kind==='x'){const j=JSON.stringify(S,null,1),c='id,tipo,inicio,fin,fuente,notas\n'+S.sessions.map(s=>[s.id,s.type,new Date(s.start).toISOString(),s.end?new Date(s.end).toISOString():'',s.source,'"'+String(s.notes||'').replace(/"/g,'""')+'"'].join(',')).join('\n');
+ return`<div class="modal"><div><h1>Exportar / importar</h1><label>JSON (copia todo)</label><textarea rows="5" id="x_j" readonly>${esc(j)}</textarea><button class="btn alt" onclick="cp('x_j')">Copiar JSON</button><label>CSV</label><textarea rows="4" id="x_c" readonly>${esc(c+'\n\ntomas\nid,tipo,hora,ml,notas\n'+S.feeds.map(f=>[f.id,f.kind,new Date(f.t).toISOString(),f.ml||'','"'+String(f.notes||'').replace(/"/g,'""')+'"'].join(',')).join('\n'))}</textarea><button class="btn alt" onclick="cp('x_c')">Copiar CSV</button><label>Importar JSON (reemplaza los datos actuales)</label><textarea rows="4" id="x_i"></textarea><button class="btn" onclick="imp()">Importar</button><button class="btn alt" onclick="modal=null;render()">Cerrar</button></div></div>`}
+ return`<div class="modal"><div><h1>${modal.id?'Editar sueño':'Añadir sueño'}</h1><label>Fecha de inicio</label><input id="f_d" type="date" value="${modal.date}"><label>Hora de inicio</label><input id="f_s" type="time" value="${modal.st}"><label>Hora de fin (vacío = en curso; si es anterior al inicio, termina al día siguiente)</label><input id="f_e" type="time" value="${modal.en}"><label>Tipo</label><select id="f_t"><option value="nap" ${modal.type==='nap'?'selected':''}>Siesta</option><option value="night" ${modal.type==='night'?'selected':''}>Noche</option></select><label>Nota (opcional)</label><input id="f_n" value="${esc(modal.notes)}"><div class="err">${esc(modal.err)}</div><button class="btn" onclick="saveForm()">Guardar</button>${modal.id?`<button class="btn warn" onclick="delSession('${modal.id}')">Eliminar</button>`:''}<button class="btn alt" onclick="modal=null;render()">Cancelar</button></div></div>`}
+function cp(i){const t=$(i);t.select();try{navigator.clipboard.writeText(t.value)}catch(e){document.execCommand('copy')}}
+function imp(){try{const o=JSON.parse($('x_i').value);if(!o||!Array.isArray(o.sessions)||!o.baby)throw 0;if(!confirm('Esto reemplaza todos los datos actuales. ¿Continuar?'))return;S=Object.assign({predictions:[],feeds:[],settings:{notif:false,h24:true}},o);save();modal=null;render()}catch(e){alert('JSON no válido.')}}
+function wipe(){if(confirm('¿Borrar TODOS los datos de este móvil? No se puede deshacer.')&&confirm('Última confirmación: se borrarán perfil, sueños y predicciones.')){try{localStorage.removeItem(K)}catch(e){}const ln=LN();if(ln)ln.cancel({notifications:[{id:1},{id:2},{id:3}]}).catch(()=>{});S=load();modal=null;tab='hoy';render()}}
+function render(){now=Date.now();const a=$('app');if(!S.baby){a.innerHTML=vProfile(true);$('nav').innerHTML='';return}
+ a.innerHTML=({hoy:vToday,hist:vHist,pred:vPred,aj:vSet}[tab])()+(modal?vModal():'');
+ $('nav').innerHTML=[['hoy','Hoy'],['hist','Historial'],['pred','Predicción'],['aj','Ajustes']].map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('')}
+// ---- autopruebas (datos sintéticos)
+function selfTest(){const R=[],t=(n,f)=>{try{R.push([n,!!f()])}catch(e){R.push([n+' (error)',false])}},Z='Europe/Madrid',N=Date.UTC(2026,5,1,12);
+ t('Cambio de hora: día de 23 h',()=>toMs('2026-03-30','00:00',Z)-toMs('2026-03-29','00:00',Z)===23*36e5);
+ t('Sueño que cruza medianoche = 8 h',()=>toMs('2026-01-11','06:00',Z)-toMs('2026-01-10','22:00',Z)===8*36e5);
+ t('Solapamiento detectado',()=>!!ov({start:5,end:15},'x',[{id:'a',start:10,end:20}]));
+ t('Sin solapamiento si son contiguos',()=>!ov({start:20,end:30},'x',[{id:'a',start:10,end:20}]));
+ t('Fecha no válida rechazada',()=>validate({start:NaN,end:1},'x')!=='');
+ t('Fin anterior al inicio rechazado',()=>validate({start:Date.now()-1e6,end:Date.now()-2e6},'x')!=='');
+ t('Sin datos: no inventa predicción',()=>predict([],[],N,6,Z).status==='sin_datos');
+ t('Timer activo: estado dormido',()=>predict([{id:'a',start:N-1e6,end:null,type:'nap'}],[],N,6,Z).status==='dormido');
+ const mk=(s,e,ty)=>({id:s+ty,start:s,end:e,type:ty}),w=N-36e5,one=[mk(w-36e5,w,'night')];
+ t('Solo edad: fiabilidad baja',()=>{const p=predict(one,[],N,6,Z);return p.status==='ok'&&p.quality==='baja'&&p.n===0});
+ t('Se actualiza tras una siesta',()=>{const a=predict(one,[],N,6,Z),b=predict(one.concat(mk(w+36e5/2,w+36e5,'nap')),[],N+36e5,6,Z);return b.status==='ok'&&b.basis>a.basis&&b.ws>a.ws});
+ t('Personalización con 10 días',()=>{const l=[];for(let i=0;i<10;i++){const d=Date.UTC(2026,4,20+i,7);l.push(mk(d-11*36e5,d,'night'),mk(d+150*6e4,d+210*6e4,'nap'))}const e=l[l.length-1].end,p=predict(l,[],e+36e5,6,Z);return p.status==='ok'&&p.n>=9&&p.center>140&&p.quality!=='baja'});
+ t('Cálculo de error',()=>calcErr({ws:0,we:20*6e4},30*6e4)===20);
+ t('Métricas ocultas con <5 datos',()=>metricsOf([{err:1},{err:2}]).mae==null);
+ t('Métricas con 5 datos',()=>metricsOf([1,2,3,4,5].map(e=>({err:e,actual:1,ws:0,we:2,}))).mae===3);
+ t('Predicciones previas no se alteran',()=>{const pr=[{ws:1,we:2,err:null,generatedAt:1}],a=JSON.stringify(pr);predict(one,pr,N,6,Z);return JSON.stringify(pr)===a});
+ t('Resumen de tomas',()=>{const r=feedStats([{t:5,ml:100},{t:6},{t:50,ml:80}],0,10);return r.n===2&&r.ml===100});
+ return R}
+const FK={pecho:'Pecho',biberon:'Biberón',solidos:'Sólidos'};
+function feedStats(l,ds,de){const f=l.filter(x=>x.t>=ds&&x.t<de);return{n:f.length,ml:f.reduce((a,x)=>a+(+x.ml||0),0)}}
+function feedCard(ds,de){const fs=feedStats(S.feeds,ds,de),last=[...S.feeds].sort((a,b)=>b.t-a.t)[0];return`<div class="card"><h2>Tomas</h2><div>Hoy: <b>${fs.n}</b>${fs.ml?' · '+fs.ml+' ml':''}</div><div class="mut">${last?'Última: '+T(last.t)+' (hace '+D(Math.max(0,now-last.t))+')':'Sin tomas registradas'}</div><div class="row" style="margin-top:8px">${Object.keys(FK).map(k=>`<button class="btn alt sm" onclick="openFeed(null,'${k}')">+ ${FK[k]}</button>`).join('')}</div></div>`}
+const fItem=f=>`<div class="item row"><div><b>${FK[f.kind]||'Toma'}</b> ${T(f.t)}${f.ml?' · '+f.ml+' ml':''}<div class="mut">${esc(f.notes)}</div></div><button class="btn alt sm" onclick="openFeed('${f.id}')">Editar</button></div>`;
+function feedSum(){const z=tz(),k=dkey(now,z),d=Array.from({length:7},(_,i)=>{const e=addDays(k,-i);return feedStats(S.feeds,toMs(e,'00:00',z),toMs(addDays(e,1),'00:00',z))}).filter(x=>x.n);if(!d.length)return'';return`<div class="mut">Tomas (7 días): ${(d.reduce((a,x)=>a+x.n,0)/d.length).toFixed(1)}/día${d.some(x=>x.ml)?' · '+Math.round(d.reduce((a,x)=>a+x.ml,0)/d.length)+' ml/día':''}</div>`}
+function openFeed(id,kind){const f=id?S.feeds.find(x=>x.id===id):null,z=tz(),t=Date.now(),td=dkey(t,z);modal={kind:'m',id,date:f?dkey(f.t,z):(tab==='hist'&&hDay?hDay:td),tm:f?hm(f.t,z):hm(t,z),fk:f?f.kind:(kind||'pecho'),ml:f&&f.ml?f.ml:'',notes:f?f.notes||'':'',err:''};render()}
+function saveFeed(){const g=i=>$(i).value,m={kind:'m',id:modal.id,date:g('m_d'),tm:g('m_t'),fk:g('m_k'),ml:g('m_m'),notes:g('m_n'),err:''},bad=e=>{modal=m;modal.err=e;render()};
+ if(!m.date||!m.tm)return bad('Falta la fecha o la hora.');const t=toMs(m.date,m.tm,tz());if(!isFinite(t)||t>Date.now()+6e4)return bad('La hora no es válida o está en el futuro.');
+ const ml=m.ml===''?0:Math.round(+m.ml);if(!(ml>=0&&ml<=1000))return bad('Cantidad en ml no válida.');const n=Date.now();
+ if(m.id)Object.assign(S.feeds.find(x=>x.id===m.id),{t,kind:m.fk,ml,notes:m.notes,updatedAt:n});else S.feeds.push({id:uid(),babyId:S.baby.id,t,kind:m.fk,ml,notes:m.notes,createdAt:n,updatedAt:n});modal=null;save();render()}
+function delFeed(id){if(confirm('¿Eliminar esta toma?')){S.feeds=S.feeds.filter(f=>f.id!==id);modal=null;save();render()}}
+function vFeedForm(){return`<div class="modal"><div><h1>${modal.id?'Editar toma':'Añadir toma'}</h1><label>Tipo</label><select id="m_k">${Object.keys(FK).map(k=>`<option value="${k}" ${modal.fk===k?'selected':''}>${FK[k]}</option>`).join('')}</select><label>Fecha</label><input id="m_d" type="date" value="${modal.date}"><label>Hora</label><input id="m_t" type="time" value="${modal.tm}"><label>Cantidad en ml (opcional)</label><input id="m_m" type="number" min="0" max="1000" value="${modal.ml}"><label>Nota (opcional)</label><input id="m_n" value="${esc(modal.notes)}"><div class="err">${esc(modal.err)}</div><button class="btn" onclick="saveFeed()">Guardar</button>${modal.id?`<button class="btn warn" onclick="delFeed('${modal.id}')">Eliminar</button>`:''}<button class="btn alt" onclick="modal=null;render()">Cancelar</button></div></div>`}
+let cm=null;
+function cmShift(n){cm=new Date(Date.UTC(+cm.slice(0,4),+cm.slice(5,7)-1+n,1)).toISOString().slice(0,7);render()}
+function vCal(){const z=tz(),today=dkey(now,z);cm=cm||today.slice(0,7);const first=cm+'-01',dim=new Date(Date.UTC(+cm.slice(0,4),+cm.slice(5,7),0)).getUTCDate(),wd=(new Date(first+'T12:00:00Z').getUTCDay()+6)%7;
+ let c=['L','M','X','J','V','S','D'].map(d=>`<div class="mut" style="text-align:center">${d}</div>`).join('')+'<div></div>'.repeat(wd);
+ for(let i=1;i<=dim;i++){const k=cm+'-'+String(i).padStart(2,'0'),ds=toMs(k,'00:00',z),de=toMs(addDays(k,1),'00:00',z),f=S.feeds.filter(x=>x.t>=ds&&x.t<de).sort((a,b)=>a.t-b.t),st=dayStats(k);
+  c+=`<div class="cd" style="${k===hDay?'border:2px solid var(--olive)':''}" onclick="hDay='${k}';render()"><b>${i}</b><div class="dots">${f.slice(0,8).map(x=>`<u class="${x.kind}"></u>`).join('')}${f.length>8?'+'+(f.length-8):''}</div><div class="sb"><i style="width:${Math.min(100,(st.nap+st.night)/36e5/16*100)}%"></i></div></div>`}
+ return`<div class="card"><div class="row"><button class="btn alt sm" onclick="cmShift(-1)">‹</button><b>${new Date(first+'T12:00:00Z').toLocaleDateString('es-ES',{month:'long',year:'numeric',timeZone:'UTC'})}</b><button class="btn alt sm" onclick="cmShift(1)">›</button></div><div class="cal" style="margin-top:8px">${c}</div><div class="mut" style="margin-top:8px"><span class="dots"><u></u>pecho <u class="biberon"></u>biberón <u class="solidos"></u>sólidos</span> · barra = sueño total del día. Toca un día para ver el detalle.</div></div>`}
+function boot(){if(S.baby)ensurePred();render();setInterval(()=>{const e=$('el');if(e&&e.dataset.t)e.textContent=D(Date.now()-+e.dataset.t)},1000);setInterval(()=>{if(!modal&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))render()},30000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!modal)render()});sched()}
+if(typeof document!=='undefined'&&document.getElementById('app')){boot();if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(()=>{})}
+</script></body></html>
